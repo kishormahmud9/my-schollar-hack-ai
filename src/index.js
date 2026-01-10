@@ -20,9 +20,8 @@ let ready = false;
 (async () => {
   await scrapeAllScholarships();
   ready = true;
-  console.log("Scholarships loaded");
 })();
-
+const PORT = process.env.PORT
 /* 🔒 Dynamic per-user recommendation */
 app.get("/recommend/:userId", async (req, res) => {
   if (!ready) {
@@ -30,7 +29,6 @@ app.get("/recommend/:userId", async (req, res) => {
   }
 
   const users = await getAllUsers();
-  console.log('users' , users)
   const user = users.find(u => u.id === req.params.userId);
 
   if (!user) {
@@ -69,6 +67,10 @@ app.use("/test", express.static("test-ui"));
 app.use("/api", compareRoutes);
 app.use(express.static("test-ui"));
 
-app.listen(3000, () => {
-  console.log("Agent backend running on http://localhost:3000");
+app.get('/', (req, res) => {
+  return res.send('API is running...');
+});
+
+app.listen(PORT, () => {
+  console.log(`Agent backend running on port ${PORT}`);
 });

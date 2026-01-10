@@ -37,8 +37,8 @@ function normalizeLevel(education = "") {
 }
 
 export async function getAllUsers() {
-  // const res = await fetch("http://localhost:5000/users");
-  const res = await fetch("http://localhost:5001/api/user/all");
+  
+  const res = await fetch(`${process.env.USER_API_BASE_URL}/api/user/all`);
   const payload = await res.json();
 
   const users = Array.isArray(payload)
