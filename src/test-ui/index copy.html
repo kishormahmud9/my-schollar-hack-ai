@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Essay Comparator</title>
+  <style>
+    body {
+      font-family: system-ui;
+      background: #f5f7fb;
+      padding: 30px;
+    }
+    .wrap {
+      max-width: 1000px;
+      margin: auto;
+      display: grid;
+      gap: 20px;
+    }
+    textarea {
+      width: 100%;
+      height: 180px;
+      padding: 12px;
+      font-size: 14px;
+    }
+    button {
+      padding: 14px;
+      font-size: 16px;
+      background: #4f46e5;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    .card {
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+    }
+    .score {
+      font-size: 36px;
+      font-weight: bold;
+    }
+    .label {
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="wrap">
+  <h1>Essay Comparison</h1>
+
+  <textarea id="essayA" placeholder="Paste Essay A here"></textarea>
+  <textarea id="essayB" placeholder="Paste Essay B here"></textarea>
+
+  <button onclick="compare()">Compare Essays</button>
+
+  <div class="card">
+    <div class="label">Essay A Score</div>
+    <div class="score" id="scoreA">—</div>
+    <p id="feedbackA"></p>
+  </div>
+
+  <div class="card">
+    <div class="label">Essay B Score</div>
+    <div class="score" id="scoreB">—</div>
+    <p id="feedbackB"></p>
+  </div>
+
+  <!-- <div class="card">
+    <div class="label">Overall Comparison</div>
+    <div class="score" id="overall">—%</div>
+    <p id="summary"></p>
+  </div> -->
+</div>
+
+<script>
+async function compare() {
+  const essayA = document.getElementById("essayA").value;
+  const essayB = document.getElementById("essayB").value;
+
+  const res = await fetch("/api/compare", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ essayA, essayB })
+  });
+
+  const data = await res.json();
+
+  document.getElementById("scoreA").textContent = data.essayA.score;
+  document.getElementById("feedbackA").textContent = data.essayA.feedback;
+
+  document.getElementById("scoreB").textContent = data.essayB.score;
+  document.getElementById("feedbackB").textContent = data.essayB.feedback;
+
+  document.getElementById("overall").textContent =
+    data.overallComparison.percentage + "%";
+  document.getElementById("summary").textContent =
+    data.overallComparison.summary;
+}
+</script>
+
+</body>
+</html>
