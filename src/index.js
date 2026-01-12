@@ -30,7 +30,7 @@ app.get("/recommend/:userId", async (req, res) => {
 
   const users = await getAllUsers();
   const user = users.find(u => u.id === req.params.userId);
-
+console.log('All users data >' , user)
   if (!user) {
     return res.status(404).json({ error: "User not found" });
   }
