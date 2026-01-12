@@ -1,43 +1,66 @@
 import OpenAI from "openai";
 
+/* =========================
+   LEVEL-BASED FILTER (ADDED)
+========================= */
+
+function isValidForLevel(s, level) {
+  const t = s.title.toLowerCase();
+  if (level === "msc" || level === "phd") {
+    return !(
+      t.includes("no essay") ||
+      t.includes("sweepstakes") ||
+      t.includes("invite")
+    );
+  }
+  return true;
+}
+
+/* =========================
+   SAFE JSON PARSER
+========================= */
+
 function safeParse(text) {
   const cleaned = text.replace(/```json|```/g, "").trim();
   return JSON.parse(cleaned);
 }
+
+/* =========================
+   MAIN AGENT FUNCTION
+========================= */
 
 export async function recommendScholarships(user, scholarships) {
   const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY
   });
 
+  /* 🔹 APPLY LEVEL FILTER (ONLY CHANGE IN LOGIC) */
+  const filtered = scholarships.filter(s =>
+    isValidForLevel(s, user.level)
+  );
+
   const prompt = `
 You are an expert scholarship recommendation agent.
 
-USER PROFILE ANALYSIS:
-- Education: ${user.education}
-- Major: ${user.major}
-- GPA: ${user.gpa}
-- CGPA Scale: ${user.cgpaScale}
-- Country: ${user.country}
-- Financial Need: ${user.financialNeed}
-- Interests: ${(user.interests || []).join(", ")}
-- Degree Level: ${user.level}
-- Degree: ${user.degree}
+USER PROFILE:
+- Education Level: ${user.level}
+- Academic Interests: ${(user.academicInterest || []).join(", ")}
+- Country: ${user.country || "Not specified"}
+- Financial Background: ${user.familyBackground || "Not specified"}
+- Student Identity: ${user.studentIdentity || "Not specified"}
+- Work & Volunteering: ${user.workAndVolunteer || "Not specified"}
+- Awards & Challenges: ${user.awardsAndChallenges || "Not specified"}
+- Unique Experience: ${user.uniqueExperience || "Not specified"}
 
-YOUR TASK:
-1. Analyze the user's academic strength, field, and need
-2. Prioritize scholarships that BEST MATCH this profile
-3. Avoid generic directories or listings
-4. Prefer STEM, AI, Data Science, merit or need based opportunities
-
-SCHOLARSHIPS (already level filtered):
-${JSON.stringify(scholarships)}
+SCHOLARSHIPS (already filtered by level):
+${JSON.stringify(filtered)}
 
 STRICT RULES:
 - Recommend EXACTLY 10 scholarships
-- Choose ONLY from the given list
+- Choose ONLY from the provided list
 - DO NOT invent type, deadline, or amount
-- Reuse type, deadline, and amount exactly as provided
+- Reuse type, deadline, and amount exactly as given
+- If a value is null, keep it null
 - Return RAW JSON ARRAY only
 - No markdown, no explanation text
 
@@ -49,7 +72,7 @@ FORMAT:
     "type": "",
     "deadline": null,
     "amount": null,
-    "description": "Why this fits the user's profile"
+    "description": ""
   }
 ]
 `;
