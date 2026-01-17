@@ -32,7 +32,7 @@ SCHOLARSHIPS (already level filtered):
 ${JSON.stringify(scholarships)}
 
 STRICT RULES:
-- Recommend EXACTLY 3 scholarships
+- Recommend EXACTLY 10 scholarships
 - Choose ONLY from the given list
 - Return RAW JSON ARRAY only
 - No markdown, no explanation text
