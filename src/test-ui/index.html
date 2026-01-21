@@ -157,7 +157,7 @@ stopBtn.onclick = async () => {
 
   output.textContent = "Processing voice...";
 
-  const res = await fetch("/api/essay/voice", {
+  const res = await fetch("/api/essay", {
     method: "POST",
     body: form
   });
@@ -222,7 +222,7 @@ function writeString(view, offset, str) {
 async function sendPrompt() {
   const prompt = document.getElementById("prompt").value;
 
-  const res = await fetch("/api/essay/prompt", {
+  const res = await fetch("/api/essay", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ prompt })
@@ -247,7 +247,7 @@ async function sendDoc() {
 
   output.textContent = "Processing document...";
 
-  const res = await fetch("/api/essay/document", {
+  const res = await fetch("/api/essay", {
     method: "POST",
     body: form
   });
