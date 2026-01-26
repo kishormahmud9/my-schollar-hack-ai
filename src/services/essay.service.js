@@ -1,20 +1,94 @@
 import { chat } from "./openai.service.js";
 import fs from "fs";
+import { retrieveRules } from "./rag/retriever.js";
 
 const systemPrompt = fs.readFileSync(
   "./src/prompts/essay.system.txt",
   "utf8"
 );
 
-// Create new essay (used by PROMPT)
-export async function generateEssay(context) {
+/* ------------------------------------------------ */
+/* WORD LIMIT CONTROL */
+/* ------------------------------------------------ */
+
+function extractWordLimit(text, defaultLimit = 250) {
+  const match = text.match(/(\d{2,4})\s*words?/i);
+  if (!match) return defaultLimit;
+
+  const value = parseInt(match[1], 10);
+
+  if (value < 100) return 100;
+  if (value > 1000) return 1000;
+
+  return value;
+}
+
+function splitBudget(total) {
+  return {
+    intro: Math.round(total * 0.2),
+    challenge: Math.round(total * 0.25),
+    action: Math.round(total * 0.25),
+    growth: Math.round(total * 0.15),
+    goal: Math.round(total * 0.15)
+  };
+}
+
+function enforceWordLimit(text, limit) {
+  const words = text.split(/\s+/);
+  if (words.length <= limit) return text;
+
+  return words
+    .slice(0, limit)
+    .join(" ")
+    .replace(/[.,;:!?]*$/, ".");
+}
+
+/* ------------------------------------------------ */
+/* ESSAY GENERATION (RAG + STRUCTURE) */
+/* ------------------------------------------------ */
+
+export async function generateEssay(userInput) {
+  const topic = userInput.slice(0, 300);
+
+  const wordLimit = extractWordLimit(userInput, 250);
+  const budget = splitBudget(wordLimit);
+
+  const introRules = await retrieveRules("How to write scholarship essay introduction with hook");
+  const challengeRules = await retrieveRules("How to describe challenge with specific example");
+  const actionRules = await retrieveRules("How to show actions taken and effort");
+  const growthRules = await retrieveRules("How to show growth and personal development");
+  const goalRules = await retrieveRules("How to connect essay to future goals and impact");
+
+  const intro = await generateSection("INTRODUCTION", topic, introRules, budget.intro);
+  const challenge = await generateSection("CHALLENGE", topic, challengeRules, budget.challenge);
+  const action = await generateSection("ACTION", topic, actionRules, budget.action);
+  const growth = await generateSection("GROWTH", topic, growthRules, budget.growth);
+  const goal = await generateSection("FUTURE GOAL", topic, goalRules, budget.goal);
+
+  const merged = [intro, challenge, action, growth, goal].join(" ");
+
+  return enforceWordLimit(merged, wordLimit);
+}
+
+async function generateSection(sectionName, topic, rules, wordBudget) {
   return chat([
-    { role: "system", content: systemPrompt },
-    { role: "user", content: context }
+    {
+      role: "system",
+      content: `You are writing ONLY the ${sectionName} of a scholarship essay.
+Follow the writing rules strictly. Do not invent facts.
+Keep this section within ${wordBudget} words.`
+    },
+    {
+      role: "user",
+      content: `Essay topic/context:\n${topic}\n\nWriting rules:\n${rules}`
+    }
   ]);
 }
 
-// Update essay using VOICE (incremental refinement)
+/* ------------------------------------------------ */
+/* EXISTING UPDATE LOGIC (UNCHANGED) */
+/* ------------------------------------------------ */
+
 export async function updateEssay(existingEssay, newContext) {
   return chat([
     {
@@ -29,7 +103,6 @@ export async function updateEssay(existingEssay, newContext) {
   ]);
 }
 
-// Update essay using DOCUMENT (reference-based merge)
 export async function updateEssayFromDocument(existingEssay, documentText) {
   return chat([
     {

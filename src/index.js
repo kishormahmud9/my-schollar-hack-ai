@@ -1,5 +1,4 @@
 import express from "express";
-import dotenv from "dotenv";
 
 import { scrapeAllScholarships } from "./utils/scraper.util.js";
 import { getAllUsers } from "./services/user.service.js";
@@ -8,8 +7,12 @@ import { recommendScholarships } from "./agent/recommendAgent.js";
 import { tempDB } from "./utils/tempDatabase.js";
 import { EssayRoutes } from "./routes/essay.routes.js";
 import { compareRoutes } from "./routes/compare.routes.js";
-
+import { loadKnowledgeText, chunkKnowledge } from "./services/rag/knowledge.loader.js";
+import { embedTexts } from "./services/rag/embedder.js";
+import { storeVectors } from "./services/rag/vector.store.js";
+import dotenv from "dotenv";
 dotenv.config();
+
 
 const app = express();
 app.use(express.json());
@@ -22,7 +25,7 @@ let ready = false;
   ready = true;
 })();
 const PORT = process.env.PORT
-/* 🔒 Dynamic per-user recommendation */
+/* Dynamic per-user recommendation */
 app.get("/recommend/:userId", async (req, res) => {
   if (!ready) {
     return res.status(503).json({ error: "Scholarship data not ready" });
@@ -70,6 +73,21 @@ app.use(express.static("test-ui"));
 app.get('/', (req, res) => {
   return res.send('API is running...');
 });
+
+async function initializeEssayRAG() {
+  console.log("Loading Essay RAG knowledge...");
+
+  const rawText = loadKnowledgeText();
+  const chunks = chunkKnowledge(rawText);
+  const embeddings = await embedTexts(chunks);
+
+  storeVectors(chunks, embeddings);
+
+  console.log(`Essay RAG ready with ${chunks.length} rule chunks.`);
+}
+
+await initializeEssayRAG();
+
 
 app.listen(PORT, () => {
   console.log(`Agent backend running on port ${PORT}`);
