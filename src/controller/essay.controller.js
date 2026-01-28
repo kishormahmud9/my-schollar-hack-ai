@@ -9,8 +9,10 @@ import { detectIntent } from "../services/intent.service.js";
 import { cleanText } from "../utils/text.cleaner.js";
 import { transcribeAudio } from "../services/whisper.service.js";
 
-// Simulated profile
+// Simulated profile (later can be dynamic from auth)
 const PROFILE_ID = "temp-profile";
+
+// essay = await generateEssay(combined, PROFILE_ID);
 
 export async function essayHandler(req, res) {
   const promptText = cleanText(req.body?.prompt || "");
@@ -51,16 +53,15 @@ export async function essayHandler(req, res) {
   let essay = existing || "";
 
   if (!existing) {
-    // New essay from whichever inputs we got
-    essay = await generateEssay(combined);
+    // generate essay with user profile
+    essay = await generateEssay(combined, PROFILE_ID);
   } else {
-    // Update existing essay incrementally:
-    // 1) merge prompt + voice style changes
     const incremental = [promptText, voiceText].filter(Boolean).join("\n\n");
+
     if (incremental) {
       essay = await updateEssay(essay, incremental);
     }
-    // 2) merge document as a reference (facts)
+
     if (documentText) {
       essay = await updateEssayFromDocument(essay, documentText);
     }

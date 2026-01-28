@@ -32,52 +32,31 @@ const UNIVERSITY_SITES = {
   }
 };
 
-/* =========================
-   VALID TITLE FILTER (YOURS)
-========================= */
+/* ========================= FILTER ======================== */
 
 function isValidTitle(title = "") {
   const t = title.toLowerCase();
-
-  const blocked = [
-    "find scholarships",
-    "featured scholarships",
-    "scholarship news",
-    "scholarship winners",
-    "directory",
-    "database",
-    "list",
-    "providers"
-  ];
+  const blocked = ["directory", "database", "list", "providers"];
   if (blocked.some(b => t.includes(b))) return false;
 
   return (
     t.includes("$") ||
-    t.includes("€") ||
-    t.includes("£") ||
     t.includes("award") ||
     t.includes("grant") ||
     t.includes("fellowship") ||
-    t.includes("fund") ||
-    t.includes("stipend")
+    t.includes("fund")
   );
 }
 
-/* =========================
-   EXTRACTION HELPERS
-========================= */
+/* ========================= HELPERS ======================== */
 
 function extractDeadline(text = "") {
-  const match = text.match(
-    /(deadline|apply by|closing date)[^a-z0-9]{0,10}.*?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+\d{4}/i
-  );
+  const match = text.match(/(deadline|apply by).*?\d{4}/i);
   return match ? match[0].trim() : null;
 }
 
 function extractAmount(text = "") {
-  const match = text.match(
-    /(\$|usd|eur|€|£)\s?\d{1,3}(?:,\d{3})*(?:\.\d+)?/i
-  );
+  const match = text.match(/(\$|usd|eur|€|£)\s?\d+/i);
   return match ? match[0] : null;
 }
 
@@ -90,27 +69,9 @@ function inferType(text = "") {
   return "General";
 }
 
-/* =========================
-   FORCE FETCH
-========================= */
-
-async function forceFetch(url) {
-  return fetch(url, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120",
-      "Accept-Language": "en-US,en;q=0.9"
-    }
-  });
-}
-
-/* =========================
-   DETAIL PAGE SCRAPER
-========================= */
-
 async function scrapeDetailPage(url) {
   try {
-    const res = await forceFetch(url);
+    const res = await fetch(url);
     if (!res.ok) return {};
 
     const html = await res.text();
@@ -127,87 +88,57 @@ async function scrapeDetailPage(url) {
   }
 }
 
-/* =========================
-   FORCE SITE SCRAPER
-========================= */
-
 async function scrapeSiteForce(siteName, config) {
-  console.log(`\n🔍 FORCE SCRAPING: ${siteName}`);
-
   const collected = [];
+  const res = await fetch(config.url);
+  const html = await res.text();
+  const $ = cheerio.load(html);
 
-  try {
-    const res = await forceFetch(config.url);
-    if (!res.ok) {
-      console.log(`❌ ${siteName} blocked (${res.status})`);
-      return [];
-    }
+  $("a").each((_, el) => {
+    const title = $(el).text().trim();
+    const href = $(el).attr("href");
+    if (!title || !href) return;
+    if (!isValidTitle(title)) return;
 
-    const html = await res.text();
-    const $ = cheerio.load(html);
+    const fullUrl = href.startsWith("http")
+      ? href
+      : new URL(href, config.url).href;
 
-    $("a").each((_, el) => {
-      const title = $(el).text().trim();
-      const href = $(el).attr("href");
+    collected.push({ title, url: fullUrl });
+  });
 
-      if (!title || !href) return;
-      if (!isValidTitle(title)) return;
+  const results = [];
+  for (const item of collected.slice(0, 20)) {
+    const detail = await scrapeDetailPage(item.url);
 
-      let fullUrl = href.startsWith("http")
-        ? href
-        : new URL(href, config.url).href;
-
-      collected.push({
-        title,
-        url: fullUrl
-      });
+    results.push({
+      scholarshipId: Buffer.from(item.title).toString("base64").slice(0, 12),
+      title: item.title,
+      type: detail.type || "General",
+      deadline: detail.deadline || null,
+      amount: detail.amount || null,
+      level: config.level,
+      source: siteName
     });
-
-    console.log(`🔗 ${siteName}: found ${collected.length} candidate links`);
-
-    const results = [];
-
-    for (const item of collected.slice(0, 20)) {
-      const detail = await scrapeDetailPage(item.url);
-
-      results.push({
-        scholarshipId: Buffer.from(item.title).toString("base64").slice(0, 12),
-        title: item.title,
-        type: detail.type || "General",
-        deadline: detail.deadline || null,
-        amount: detail.amount || null,
-        level: config.level,
-        source: siteName
-      });
-    }
-
-    console.log(`✅ ${siteName}: scraped ${results.length} scholarships`);
-    return results;
-  } catch (err) {
-    console.log(`❌ ${siteName} error: ${err.message}`);
-    return [];
   }
+
+  return results;
 }
 
-/* =========================
-   MASTER SCRAPER
-========================= */
+/* ========================= MAIN ======================== */
 
 export async function scrapeAllScholarships() {
   tempDB.college = [];
   tempDB.university = [];
 
-  console.log("\n===== COLLEGE =====");
   for (const [name, cfg] of Object.entries(COLLEGE_SITES)) {
     tempDB.college.push(...await scrapeSiteForce(name, cfg));
   }
 
-  console.log("\n===== UNIVERSITY =====");
   for (const [name, cfg] of Object.entries(UNIVERSITY_SITES)) {
     tempDB.university.push(...await scrapeSiteForce(name, cfg));
   }
 
-  // Deduplicate
   tempDB.college = [
     ...new Map(tempDB.college.map(s => [s.title.toLowerCase(), s])).values()
   ];
@@ -215,7 +146,10 @@ export async function scrapeAllScholarships() {
     ...new Map(tempDB.university.map(s => [s.title.toLowerCase(), s])).values()
   ];
 
-  console.log("\n===== SUMMARY =====");
-  console.log("College:", tempDB.college.length);
-  console.log("University:", tempDB.university.length);
+  const allScholarships = [
+    ...tempDB.college,
+    ...tempDB.university
+  ];
+
+  return allScholarships;  
 }

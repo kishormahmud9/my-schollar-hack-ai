@@ -1,6 +1,7 @@
 import { chat } from "./openai.service.js";
 import fs from "fs";
 import { retrieveRules } from "./rag/retriever.js";
+import { getUserProfile } from "./profile.service.js";
 
 const systemPrompt = fs.readFileSync(
   "./src/prompts/essay.system.txt",
@@ -16,7 +17,6 @@ function extractWordLimit(text, defaultLimit = 250) {
   if (!match) return defaultLimit;
 
   const value = parseInt(match[1], 10);
-
   if (value < 100) return 100;
   if (value > 1000) return 1000;
 
@@ -44,14 +44,26 @@ function enforceWordLimit(text, limit) {
 }
 
 /* ------------------------------------------------ */
-/* ESSAY GENERATION (RAG + STRUCTURE) */
+/* ESSAY GENERATION (RAG + PROFILE + STRUCTURE) */
 /* ------------------------------------------------ */
 
-export async function generateEssay(userInput) {
+export async function generateEssay(userInput, userId) {
   const topic = userInput.slice(0, 300);
 
   const wordLimit = extractWordLimit(userInput, 250);
   const budget = splitBudget(wordLimit);
+
+  // 🔥 Fetch student profile
+  const profile = await getUserProfile(userId);
+
+  const profileText = `
+Student Name: ${profile?.name || ""}
+Major: ${profile?.major || ""}
+Career Goal: ${profile?.careerGoal || ""}
+Key Achievement: ${profile?.achievement || ""}
+Background: ${profile?.background || ""}
+Challenges: ${profile?.challenges || ""}
+`;
 
   const introRules = await retrieveRules("How to write scholarship essay introduction with hook");
   const challengeRules = await retrieveRules("How to describe challenge with specific example");
@@ -59,18 +71,18 @@ export async function generateEssay(userInput) {
   const growthRules = await retrieveRules("How to show growth and personal development");
   const goalRules = await retrieveRules("How to connect essay to future goals and impact");
 
-  const intro = await generateSection("INTRODUCTION", topic, introRules, budget.intro);
-  const challenge = await generateSection("CHALLENGE", topic, challengeRules, budget.challenge);
-  const action = await generateSection("ACTION", topic, actionRules, budget.action);
-  const growth = await generateSection("GROWTH", topic, growthRules, budget.growth);
-  const goal = await generateSection("FUTURE GOAL", topic, goalRules, budget.goal);
+  const intro = await generateSection("INTRODUCTION", topic, profileText, introRules, budget.intro);
+  const challenge = await generateSection("CHALLENGE", topic, profileText, challengeRules, budget.challenge);
+  const action = await generateSection("ACTION", topic, profileText, actionRules, budget.action);
+  const growth = await generateSection("GROWTH", topic, profileText, growthRules, budget.growth);
+  const goal = await generateSection("FUTURE GOAL", topic, profileText, goalRules, budget.goal);
 
   const merged = [intro, challenge, action, growth, goal].join(" ");
 
   return enforceWordLimit(merged, wordLimit);
 }
 
-async function generateSection(sectionName, topic, rules, wordBudget) {
+async function generateSection(sectionName, topic, profileText, rules, wordBudget) {
   return chat([
     {
       role: "system",
@@ -80,7 +92,7 @@ Keep this section within ${wordBudget} words.`
     },
     {
       role: "user",
-      content: `Essay topic/context:\n${topic}\n\nWriting rules:\n${rules}`
+      content: `Student Profile:\n${profileText}\n\nEssay topic/context:\n${topic}\n\nWriting rules:\n${rules}`
     }
   ]);
 }
