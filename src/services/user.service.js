@@ -1,15 +1,20 @@
 import fetch from "node-fetch";
 
 export async function getAllUsers() {
-  const res = await fetch(process.env.USER_API_URL);
+  const USER_API = process.env.USER_API_URL;
 
-  if (!res.ok) {
-    throw new Error("Failed to fetch user profiles from backend");
+  if (!USER_API) {
+    throw new Error("USER_API_URL not set in environment variables");
   }
 
-  const json = await res.json();
+  const res = await fetch(USER_API);
 
-  const users = json.data || [];   // 🔥 FIX HERE
+  if (!res.ok) {
+    throw new Error("Failed to fetch users from backend");
+  }
+
+  const data = await res.json();
+  const users = Array.isArray(data) ? data : data.data || [];
 
   return users.map(u => ({
     ...u,

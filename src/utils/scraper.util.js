@@ -1,11 +1,9 @@
 import fetch from "node-fetch";
 import * as cheerio from "cheerio";
-import { tempDB } from "./tempDatabase.js";
 
 /* =========================
    SITE CONFIG
 ========================= */
-
 const COLLEGE_SITES = {
   "scholarships.com": {
     url: "https://www.scholarships.com/scholarships",
@@ -32,124 +30,137 @@ const UNIVERSITY_SITES = {
   }
 };
 
-/* ========================= FILTER ======================== */
+/* =========================
+   SAFE FETCH
+========================= */
+function safeFetch(url, maxWait = 20000) {
+  return Promise.race([
+    fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } }),
+    new Promise(resolve => setTimeout(() => resolve(null), maxWait))
+  ]);
+}
 
+/* =========================
+   TITLE FILTER
+========================= */
 function isValidTitle(title = "") {
-  const t = title.toLowerCase();
-  const blocked = ["directory", "database", "list", "providers"];
+  const t = title.toLowerCase().trim();
+
+  const blocked = [
+    "find scholarships", "featured scholarships", "scholarship news",
+    "providers", "directory", "builder", "list",
+    "login", "sign in", "register", "menu"
+  ];
+
   if (blocked.some(b => t.includes(b))) return false;
 
   return (
-    t.includes("$") ||
+    /\$\d+/.test(t) ||
+    t.includes("scholarship") ||
     t.includes("award") ||
     t.includes("grant") ||
-    t.includes("fellowship") ||
-    t.includes("fund")
+    t.includes("fellowship")
   );
 }
 
-/* ========================= HELPERS ======================== */
-
-function extractDeadline(text = "") {
-  const match = text.match(/(deadline|apply by).*?\d{4}/i);
-  return match ? match[0].trim() : null;
+/* =========================
+   BUILD BASE OBJECT
+========================= */
+function buildScholarship(title, level, source, detailUrl) {
+  return {
+    scholarshipId: Buffer.from(title).toString("base64").slice(0, 12),
+    title,
+    type: "General",
+    deadline: null,
+    amount: null,
+    level,
+    source,
+    detailUrl
+  };
 }
 
-function extractAmount(text = "") {
-  const match = text.match(/(\$|usd|eur|€|£)\s?\d+/i);
-  return match ? match[0] : null;
-}
+/* =========================
+   SCRAPE LISTING PAGE
+========================= */
+async function scrapeSite(siteName, config) {
+  const res = await safeFetch(config.url);
+  if (!res) return [];
 
-function inferType(text = "") {
-  const t = text.toLowerCase();
-  if (t.includes("merit")) return "Merit-based";
-  if (t.includes("need")) return "Need-based";
-  if (t.includes("fellowship")) return "Fellowship";
-  if (t.includes("grant")) return "Grant";
-  return "General";
-}
-
-async function scrapeDetailPage(url) {
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return {};
-
-    const html = await res.text();
-    const $ = cheerio.load(html);
-    const text = $("body").text();
-
-    return {
-      deadline: extractDeadline(text),
-      amount: extractAmount(text),
-      type: inferType(text)
-    };
-  } catch {
-    return {};
-  }
-}
-
-async function scrapeSiteForce(siteName, config) {
-  const collected = [];
-  const res = await fetch(config.url);
   const html = await res.text();
   const $ = cheerio.load(html);
+  const results = [];
 
   $("a").each((_, el) => {
     const title = $(el).text().trim();
     const href = $(el).attr("href");
+
     if (!title || !href) return;
+    if (title.length < 8 || title.length > 120) return;
     if (!isValidTitle(title)) return;
 
     const fullUrl = href.startsWith("http")
       ? href
       : new URL(href, config.url).href;
 
-    collected.push({ title, url: fullUrl });
+    results.push(buildScholarship(title, config.level, siteName, fullUrl));
   });
 
-  const results = [];
-  for (const item of collected.slice(0, 20)) {
-    const detail = await scrapeDetailPage(item.url);
-
-    results.push({
-      scholarshipId: Buffer.from(item.title).toString("base64").slice(0, 12),
-      title: item.title,
-      type: detail.type || "General",
-      deadline: detail.deadline || null,
-      amount: detail.amount || null,
-      level: config.level,
-      source: siteName
-    });
-  }
-
-  return results;
+  return results.slice(0, 20);
 }
 
-/* ========================= MAIN ======================== */
+/* =========================
+   DETAIL PAGE ENRICHMENT
+========================= */
+async function enrichScholarship(s) {
+  try {
+    const res = await safeFetch(s.detailUrl, 15000);
+    if (!res) return s;
 
+    const html = await res.text();
+    const clean = html.replace(/\s+/g, " ");
+
+    const amountMatch = clean.match(/\$\s?\d{1,3}(,\d{3})*/);
+    const deadlineMatch = clean.match(
+      /(deadline|apply by|closing date)[^0-9]{0,10}(\w+\s\d{1,2},?\s?\d{4})/i
+    );
+
+    return {
+      ...s,
+      amount: amountMatch ? amountMatch[0] : null,
+      deadline: deadlineMatch ? deadlineMatch[2] : null
+    };
+  } catch {
+    return s;
+  }
+}
+
+/* =========================
+   MAIN SCRAPER
+========================= */
 export async function scrapeAllScholarships() {
-  tempDB.college = [];
-  tempDB.university = [];
+  const allSites = { ...COLLEGE_SITES, ...UNIVERSITY_SITES };
 
-  for (const [name, cfg] of Object.entries(COLLEGE_SITES)) {
-    tempDB.college.push(...await scrapeSiteForce(name, cfg));
-  }
+  const tasks = Object.entries(allSites).map(([name, cfg]) =>
+    scrapeSite(name, cfg)
+  );
 
-  for (const [name, cfg] of Object.entries(UNIVERSITY_SITES)) {
-    tempDB.university.push(...await scrapeSiteForce(name, cfg));
-  }
+  const data = await Promise.allSettled(tasks);
 
-  tempDB.college = [
-    ...new Map(tempDB.college.map(s => [s.title.toLowerCase(), s])).values()
-  ];
-  tempDB.university = [
-    ...new Map(tempDB.university.map(s => [s.title.toLowerCase(), s])).values()
-  ];
+  let scholarships = data
+    .filter(r => r.status === "fulfilled")
+    .flatMap(r => r.value);
 
-  const allScholarships = [
-    ...tempDB.college,
-    ...tempDB.university
+  // Remove duplicates
+  scholarships = [
+    ...new Map(scholarships.map(s => [s.title.toLowerCase(), s])).values()
   ];
 
-  return allScholarships;  
+  // Enrich with detail page data
+  const enriched = await Promise.allSettled(
+    scholarships.slice(0, 15).map(enrichScholarship)
+  );
+
+  return enriched
+    .filter(r => r.status === "fulfilled")
+    .map(r => r.value);
 }

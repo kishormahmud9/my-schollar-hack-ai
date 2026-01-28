@@ -1,9 +1,8 @@
 import express from "express";
-import fetch from "node-fetch";
 import dotenv from "dotenv";
 import { scrapeAllScholarships } from "./utils/scraper.util.js";
 import { getAllUsers } from "./services/user.service.js";
-import { getScholarships } from "./services/scholarship.service.js";
+import { getAllScholarships } from "./services/scholarship.service.js";
 import { recommendScholarships } from "./agent/recommendAgent.js";
 import { EssayRoutes } from "./routes/essay.routes.js";
 import { compareRoutes } from "./routes/compare.routes.js";
@@ -15,57 +14,67 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-/* 🔥 Backend API from ENV */
-const BACKEND_API = process.env.BACKEND_BULK_API;
 
-if (!BACKEND_API) {
-  console.error("BACKEND_BULK_API missing in .env");
-  process.exit(1);
-}
-
-
-// =========================
-// SCRAPER → BACKEND SYNC
-// =========================
+/* =====================================================
+   SCRAPER DATA PROVIDER API
+===================================================== */
 app.post("/api/scrape-sync", async (req, res) => {
-  try {
-    const scholarships = await scrapeAllScholarships();
+  console.log("📡 Scrape endpoint hit");
 
-    await fetch(BACKEND_API, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify(scholarships )
-});
+  try {
+    // Safety: never hang forever
+    const scholarships = await Promise.race([
+      scrapeAllScholarships(),
+      new Promise(resolve =>
+        setTimeout(() => resolve([]), 30000) // 30s max
+      )
+    ]);
+
+    if (!Array.isArray(scholarships) || scholarships.length === 0) {
+      console.log("⚠ Scraper returned empty or timed out");
+      return res.status(500).json({
+        success: false,
+        error: "Scraper returned no data"
+      });
+    }
+
+    console.log(`✅ Scraped ${scholarships.length} scholarships`);
 
     res.json({
-      status: "Scraped and sent to backend",
-      count: scholarships.length
+      success: true,
+      count: scholarships.length,
+      data: scholarships
     });
 
   } catch (err) {
-    console.error("Scrape sync failed:", err.message);
-    res.status(500).json({ error: err.message });
+    console.error("❌ Scraper error:", err.message);
+    res.status(500).json({
+      success: false,
+      error: err.message
+    });
   }
 });
 
 
-// =========================
-// RECOMMENDATION ROUTE
-// =========================
-app.get("/recommend/:userId", async (req, res) => {
+/* =====================================================
+   AI SCHOLARSHIP RECOMMENDATION
+===================================================== */
+app.get("/api/ai/recommend-scholarships/:userId", async (req, res) => {
   try {
+    const { userId } = req.params;
+
     const users = await getAllUsers();
-    const user = users.find(u => String(u.id) === String(req.params.userId));
+    const user = users.find(u => String(u.id) === String(userId));
 
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
 
-    const scholarships = await getScholarships(user.level);
+    const scholarships = await getAllScholarships();
 
     if (!scholarships.length) {
       return res.status(404).json({
-        error: `No scholarships found for level ${user.level}`
+        error: "No scholarships available"
       });
     }
 
@@ -73,6 +82,7 @@ app.get("/recommend/:userId", async (req, res) => {
 
     res.json({
       userId: user.id,
+      level: user.level,
       recommendations
     });
 
@@ -83,16 +93,16 @@ app.get("/recommend/:userId", async (req, res) => {
 });
 
 
-// =========================
-// ESSAY + COMPARE
-// =========================
+/* =====================================================
+   ESSAY + COMPARE AGENTS
+===================================================== */
 app.use("/api/essay", EssayRoutes);
 app.use("/api", compareRoutes);
 
 
-// =========================
-// SERVER START
-// =========================
+/* =====================================================
+   SERVER START
+===================================================== */
 app.listen(PORT, () => {
-  console.log(`Agent backend running on port ${PORT}`);
+  console.log(`🚀 AI Agent service running on port ${PORT}`);
 });
