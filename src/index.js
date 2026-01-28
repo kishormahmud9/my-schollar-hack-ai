@@ -32,10 +32,10 @@ app.post("/api/scrape-sync", async (req, res) => {
     const scholarships = await scrapeAllScholarships();
 
     await fetch(BACKEND_API, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scholarships })
-    });
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(scholarships )
+});
 
     res.json({
       status: "Scraped and sent to backend",
