@@ -1,6 +1,9 @@
 import fetch from "node-fetch";
 
 export async function getAllUsers() {
+  console.log('All user hitting')
+
+  
   const USER_API = process.env.USER_API_URL;
 
   if (!USER_API) {
