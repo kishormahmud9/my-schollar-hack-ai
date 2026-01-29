@@ -8,9 +8,7 @@ const systemPrompt = fs.readFileSync(
   "utf8"
 );
 
-/* ------------------------------------------------ */
 /* WORD LIMIT CONTROL */
-/* ------------------------------------------------ */
 
 function extractWordLimit(text, defaultLimit = 250) {
   const match = text.match(/(\d{2,4})\s*words?/i);
@@ -37,15 +35,10 @@ function enforceWordLimit(text, limit) {
   const words = text.split(/\s+/);
   if (words.length <= limit) return text;
 
-  return words
-    .slice(0, limit)
-    .join(" ")
-    .replace(/[.,;:!?]*$/, ".");
+  return words.slice(0, limit).join(" ").replace(/[.,;:!?]*$/, ".");
 }
 
-/* ------------------------------------------------ */
-/* ESSAY GENERATION (RAG + PROFILE + STRUCTURE) */
-/* ------------------------------------------------ */
+/* ESSAY GENERATION */
 
 export async function generateEssay(userInput, userId) {
   const topic = userInput.slice(0, 300);
@@ -53,7 +46,6 @@ export async function generateEssay(userInput, userId) {
   const wordLimit = extractWordLimit(userInput, 250);
   const budget = splitBudget(wordLimit);
 
-  // 🔥 Fetch student profile
   const profile = await getUserProfile(userId);
 
   const profileText = `
@@ -82,13 +74,46 @@ Challenges: ${profile?.challenges || ""}
   return enforceWordLimit(merged, wordLimit);
 }
 
+/* 🔥 HUMANIZED SECTION GENERATION (MAIN CHANGE) */
+
 async function generateSection(sectionName, topic, profileText, rules, wordBudget) {
   return chat([
     {
       role: "system",
-      content: `You are writing ONLY the ${sectionName} of a scholarship essay.
-Follow the writing rules strictly. Do not invent facts.
-Keep this section within ${wordBudget} words.`
+      content: `
+You are writing the ${sectionName} of a scholarship essay.
+
+IDENTITY MODE:
+This essay must sound like a real student describing their own life.
+
+STRICT FACT CONSTRAINT:
+You may ONLY use information found in:
+- Student profile
+- User input
+- Uploaded document
+- Transcribed audio
+
+If specific data (grades, awards, projects, numbers) is NOT provided,
+DO NOT invent it.
+DO NOT replace missing facts with generic academic success stories.
+
+HUMANIZATION RULES:
+- Write in first person
+- Focus on reflection and perspective, not dramatic storytelling
+- Explain how experiences influenced thinking or direction
+- Keep tone professional but natural
+
+AVOID:
+- "I have always been passionate"
+- Overly perfect achievements
+- Resume-style skill lists
+- Emotional exaggeration
+
+If information is limited, write a grounded, honest, general reflection.
+
+Limit to ${wordBudget} words.
+`
+
     },
     {
       role: "user",
@@ -97,18 +122,14 @@ Keep this section within ${wordBudget} words.`
   ]);
 }
 
-/* ------------------------------------------------ */
-/* EXISTING UPDATE LOGIC (UNCHANGED) */
-/* ------------------------------------------------ */
+/* EXISTING UPDATE LOGIC */
 
 export async function updateEssay(existingEssay, newContext) {
   return chat([
     {
       role: "system",
       content:
-        "You are refining an existing academic essay. " +
-        "Do NOT invent facts. Only integrate the new information. " +
-        "Preserve tone and structure."
+        "You are refining an existing academic essay. Do NOT invent facts. Only integrate the new information. Preserve tone and structure."
     },
     { role: "user", content: "Existing essay:\n" + existingEssay },
     { role: "user", content: "New input:\n" + newContext }
@@ -120,13 +141,7 @@ export async function updateEssayFromDocument(existingEssay, documentText) {
     {
       role: "system",
       content:
-        "You are updating an existing academic essay using a reference document.\n" +
-        "Rules:\n" +
-        "- Do NOT rewrite the essay from scratch\n" +
-        "- Preserve structure, tone, and voice\n" +
-        "- Only extract relevant facts from the document\n" +
-        "- Integrate carefully without duplication\n" +
-        "- Do NOT add assumptions or new facts"
+        "You are updating an existing academic essay using a reference document. Preserve structure and voice. Extract only relevant facts. Do not add assumptions."
     },
     { role: "user", content: "Current essay:\n" + existingEssay },
     { role: "user", content: "Reference document:\n" + documentText }
