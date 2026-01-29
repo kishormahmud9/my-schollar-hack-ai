@@ -13,7 +13,7 @@ import { getUserProfile } from "../services/profile.service.js";
 export async function essayHandler(req, res) {
   try {
     /* ---------------- USER ID REQUIRED ---------------- */
-    const PROFILE_ID = req.body.userId;
+    const PROFILE_ID = req.params.userId;
 
     if (!PROFILE_ID) {
       return res.status(400).json({ error: "userId is required" });

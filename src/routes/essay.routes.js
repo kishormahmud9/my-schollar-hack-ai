@@ -24,6 +24,6 @@ function maybeMultipart(req, res, next) {
 
 // Single unified route:
 // POST /api/essay
-router.post("/", maybeMultipart, essayHandler);
+router.post("/:userId", maybeMultipart, essayHandler);
 
 export const EssayRoutes = router;
