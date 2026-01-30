@@ -8,7 +8,7 @@ export async function getAllScholarships() {
   // const SCHOLARSHIP_API = process.env.SCHOLARSHIP_AI_API_URL;
   // scholarship api hard coded 
   const SCHOLARSHIP_API =
-    "http://172.252.13.97:8021/api/essay-recommendation/scholarships/all/for-ai";
+    "https://test9.fireai.agency/api/essay-recommendation/scholarships/all/for-ai";
 
   console.log("Scholarship API hitting ->", SCHOLARSHIP_API);
 
