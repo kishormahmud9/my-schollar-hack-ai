@@ -17,7 +17,8 @@
     "multer": "^2.0.2",
     "node-fetch": "^3.3.2",
     "openai": "^6.10.0",
-    "pdfjs-dist": "^5.4.449"
+    "pdfjs-dist": "^5.4.449",
+    "puppeteer": "^24.36.1"
   },
   "devDependencies": {
     "nodemon": "^3.1.11"

@@ -12,19 +12,21 @@ import { compareRoutes } from "./routes/compare.routes.js";
 import { initializeKnowledge } from "./services/knowledge.init.js";
 
 const PORT = process.env.PORT || 3000;
-
 const app = express();
+
 app.use(express.json());
 
-/* SCRAPER API */
+/* =========================
+   SCRAPER API (FIXED)
+========================= */
 app.post("/api/scrape-sync", async (req, res) => {
   console.log("📡 Scrape endpoint hit");
 
   try {
-    const scholarships = await Promise.race([
-      scrapeAllScholarships(),
-      new Promise(resolve => setTimeout(() => resolve([]), 30000)),
-    ]);
+    // ⛔ REMOVED Promise.race timeout killer
+    const scholarships = await scrapeAllScholarships();
+
+    console.log("Scraper returned:", scholarships.length);
 
     if (!Array.isArray(scholarships) || scholarships.length === 0) {
       return res.status(500).json({
@@ -45,7 +47,9 @@ app.post("/api/scrape-sync", async (req, res) => {
   }
 });
 
-/* SCHOLARSHIP RECOMMENDATION */
+/* =========================
+   SCHOLARSHIP RECOMMENDATION
+========================= */
 app.get("/api/ai/recommend-scholarships/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
@@ -75,7 +79,9 @@ app.get("/api/ai/recommend-scholarships/:userId", async (req, res) => {
   }
 });
 
-/* ESSAY + COMPARE AGENTS */
+/* =========================
+   ESSAY + COMPARE AGENTS
+========================= */
 app.use("/api/essay", EssayRoutes);
 app.use("/api", compareRoutes);
 
@@ -83,7 +89,9 @@ app.get("/", (req, res) => {
   res.send("My Scholar AI is running");
 });
 
-/* ✅ SERVER START WITH RAG INITIALIZATION */
+/* =========================
+   SERVER START + RAG INIT
+========================= */
 (async () => {
   try {
     console.log("📚 Initializing essay knowledge...");

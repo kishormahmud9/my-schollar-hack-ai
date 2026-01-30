@@ -1,133 +1,144 @@
-import fetch from "node-fetch";
+import puppeteer from "puppeteer";
 import * as cheerio from "cheerio";
 
 /* =========================
-   SITE CONFIG
+   SITES
 ========================= */
-const COLLEGE_SITES = {
-  "scholarships.com": {
-    url: "https://www.scholarships.com/scholarships",
-    level: "college"
-  },
-  "fastweb.com": {
-    url: "https://www.fastweb.com/college-scholarships",
-    level: "college"
-  }
-};
-
-const UNIVERSITY_SITES = {
-  "daad.de": {
-    url: "https://www2.daad.de/deutschland/stipendium/datenbank/en/21148-scholarship-database/",
-    level: "university"
-  },
-  "mastersportal.com": {
-    url: "https://www.mastersportal.com/search/scholarships/master",
-    level: "university"
-  },
-  "iefa.org": {
-    url: "https://www.iefa.org/scholarships",
-    level: "university"
-  }
+const ALL_SITES = {
+  "fastweb.com": "https://www.fastweb.com/college-scholarships",
+  "iefa.org": "https://www.iefa.org/scholarships",
+  "daad.de": "https://www2.daad.de/deutschland/stipendium/datenbank/en/21148-scholarship-database/",
+  "mastersportal.com": "https://www.mastersportal.com/search/scholarships/master",
+  "scholarshipowl-nursing": "https://scholarshipowl.com/scholarship-list/by-major/nursing-scholarships",
+  "scholarshipowl-merit": "https://scholarshipowl.com/scholarship-list/by-type/merit-based-scholarships"
 };
 
 /* =========================
-   SAFE FETCH
+   BROWSER FETCH
 ========================= */
-function safeFetch(url, maxWait = 20000) {
-  return Promise.race([
-    fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } }),
-    new Promise(resolve => setTimeout(() => resolve(null), maxWait))
-  ]);
+async function getHTML(url) {
+  try {
+    const browser = await puppeteer.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"]
+    });
+
+    const page = await browser.newPage();
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
+    await new Promise(r => setTimeout(r, 3000));
+
+    const html = await page.content();
+    await browser.close();
+    return html;
+  } catch {
+    return null;
+  }
 }
 
 /* =========================
-   TITLE FILTER
+   VALID LINK FILTER
 ========================= */
-function isValidTitle(title = "") {
-  const t = title.toLowerCase().trim();
+function isValidScholarshipLink(title, url) {
+  if (!title || title.length < 10) return false;
 
-  const blocked = [
-    "find scholarships", "featured scholarships", "scholarship news",
-    "providers", "directory", "builder", "list",
-    "login", "sign in", "register", "menu"
+  const badTitles = [
+    "find scholarships",
+    "featured scholarships",
+    "scholarships",
+    "directory",
+    "login",
+    "register"
   ];
 
-  if (blocked.some(b => t.includes(b))) return false;
+  if (badTitles.some(t => title.toLowerCase().includes(t))) return false;
 
-  return (
-    /\$\d+/.test(t) ||
-    t.includes("scholarship") ||
-    t.includes("award") ||
-    t.includes("grant") ||
-    t.includes("fellowship")
-  );
+  const badDomains = [
+    "doubleclick",
+    "adnxs",
+    "gampad",
+    "clktrb",
+    "pubads"
+  ];
+
+  if (badDomains.some(d => url.includes(d))) return false;
+
+  return /scholarship|award|grant|fellowship/i.test(title);
 }
 
 /* =========================
-   BUILD BASE OBJECT
+   SUBJECT DETECTION
 ========================= */
-function buildScholarship(title, level, source, detailUrl) {
-  return {
-    scholarshipId: Buffer.from(title).toString("base64").slice(0, 12),
-    title,
-    type: "General",
-    deadline: null,
-    amount: null,
-    level,
-    source,
-    detailUrl
-  };
+function detectSubject(text = "") {
+  const t = text.toLowerCase();
+
+  if (t.match(/nursing|medical|health|mbbs|pharmacy/)) return "Medical";
+  if (t.match(/computer|software|ai|data|cyber|it|information/)) return "Information Technology (IT)";
+  if (t.match(/biology|chemistry|physics|math|science|biotech/)) return "Science";
+
+  return "General";
 }
 
 /* =========================
-   SCRAPE LISTING PAGE
+   SCRAPE LIST PAGE
 ========================= */
-async function scrapeSite(siteName, config) {
-  const res = await safeFetch(config.url);
-  if (!res) return [];
+async function scrapeSite(name, url) {
+  const html = await getHTML(url);
+  if (!html) return [];
 
-  const html = await res.text();
   const $ = cheerio.load(html);
-  const results = [];
+  const list = [];
 
   $("a").each((_, el) => {
     const title = $(el).text().trim();
     const href = $(el).attr("href");
+    if (!href) return;
 
-    if (!title || !href) return;
-    if (title.length < 8 || title.length > 120) return;
-    if (!isValidTitle(title)) return;
+    const fullUrl = href.startsWith("http") ? href : new URL(href, url).href;
 
-    const fullUrl = href.startsWith("http")
-      ? href
-      : new URL(href, config.url).href;
+    if (!isValidScholarshipLink(title, fullUrl)) return;
 
-    results.push(buildScholarship(title, config.level, siteName, fullUrl));
+    list.push({
+      title,
+      subject: "General",
+      provider: name,
+      amount: null,
+      description: null,
+      deadline: null,
+      detailUrl: fullUrl
+    });
   });
 
-  return results.slice(0, 20);
+  return list.slice(0, 30);
 }
 
 /* =========================
-   DETAIL PAGE ENRICHMENT
+   DETAIL ENRICH
 ========================= */
-async function enrichScholarship(s) {
+async function enrich(s) {
   try {
-    const res = await safeFetch(s.detailUrl, 15000);
-    if (!res) return s;
+    const html = await getHTML(s.detailUrl);
+    if (!html) return s;
 
-    const html = await res.text();
-    const clean = html.replace(/\s+/g, " ");
+    const $ = cheerio.load(html);
+    $("script, style, noscript, header, footer, nav").remove();
 
-    const amountMatch = clean.match(/\$\s?\d{1,3}(,\d{3})*/);
-    const deadlineMatch = clean.match(
-      /(deadline|apply by|closing date)[^0-9]{0,10}(\w+\s\d{1,2},?\s?\d{4})/i
-    );
+    const description = $("p")
+      .map((_, el) => $(el).text().trim())
+      .get()
+      .filter(t => t.length > 100)
+      .slice(0, 2)
+      .join(" ");
+
+    const clean = $.text().replace(/\s+/g, " ");
+    const amount = clean.match(/\$\s?\d{1,3}(,\d{3})*/)?.[0] || null;
+    const deadline = clean.match(/(deadline|apply by)[^0-9]{0,10}(\w+\s\d{1,2},?\s?\d{4})/i)?.[2] || null;
 
     return {
       ...s,
-      amount: amountMatch ? amountMatch[0] : null,
-      deadline: deadlineMatch ? deadlineMatch[2] : null
+      subject: detectSubject(description || s.title),
+      amount,
+      deadline,
+      description: description || null
     };
   } catch {
     return s;
@@ -138,29 +149,22 @@ async function enrichScholarship(s) {
    MAIN SCRAPER
 ========================= */
 export async function scrapeAllScholarships() {
-  const allSites = { ...COLLEGE_SITES, ...UNIVERSITY_SITES };
-
-  const tasks = Object.entries(allSites).map(([name, cfg]) =>
-    scrapeSite(name, cfg)
+  const tasks = Object.entries(ALL_SITES).map(([name, url]) =>
+    scrapeSite(name, url)
   );
 
-  const data = await Promise.allSettled(tasks);
+  const data = (await Promise.all(tasks)).flat();
 
-  let scholarships = data
-    .filter(r => r.status === "fulfilled")
-    .flatMap(r => r.value);
-
-  // Remove duplicates
-  scholarships = [
-    ...new Map(scholarships.map(s => [s.title.toLowerCase(), s])).values()
-  ];
-
-  // Enrich with detail page data
-  const enriched = await Promise.allSettled(
-    scholarships.slice(0, 15).map(enrichScholarship)
+  const unique = data.filter(
+    (s, i, arr) =>
+      s.title &&
+      arr.findIndex(x => x.title === s.title && x.provider === s.provider) === i
   );
 
-  return enriched
-    .filter(r => r.status === "fulfilled")
-    .map(r => r.value);
+  const enriched = [];
+  for (let s of unique.slice(0, 20)) {
+    enriched.push(await enrich(s));
+  }
+
+  return enriched;
 }
