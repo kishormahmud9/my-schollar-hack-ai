@@ -1,9 +1,8 @@
 import OpenAI from "openai";
 
 /* =========================
-   LEVEL-BASED FILTER (ADDED)
+   LEVEL-BASED FILTER
 ========================= */
-
 function isValidForLevel(s, level) {
   const t = s.title.toLowerCase();
   if (level === "msc" || level === "phd") {
@@ -19,22 +18,31 @@ function isValidForLevel(s, level) {
 /* =========================
    SAFE JSON PARSER
 ========================= */
-
 function safeParse(text) {
   const cleaned = text.replace(/```json|```/g, "").trim();
   return JSON.parse(cleaned);
 }
 
 /* =========================
+   RESTORE ORIGINAL AMOUNT FORMAT
+   (Prevents LLM from converting "$1,000" → 1000)
+========================= */
+function restoreAmountFormat(recommended, originalList) {
+  const map = new Map(originalList.map(s => [s.title, s.amount ?? null]));
+  return recommended.map(r => ({
+    ...r,
+    amount: map.has(r.title) ? map.get(r.title) : null
+  }));
+}
+
+/* =========================
    MAIN AGENT FUNCTION
 ========================= */
-
 export async function recommendScholarships(user, scholarships) {
   const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY
   });
 
-  /* 🔹 APPLY LEVEL FILTER (ONLY CHANGE IN LOGIC) */
   const filtered = scholarships.filter(s =>
     isValidForLevel(s, user.level)
   );
@@ -59,29 +67,36 @@ STRICT RULES:
 - Recommend EXACTLY 10 scholarships
 - Choose ONLY from the provided list
 - DO NOT invent type, deadline, or amount
-- Reuse type, deadline, and amount exactly as given
+- Reuse type, deadline, and amount EXACTLY as given
+- DO NOT convert currency format
 - If a value is null, keep it null
 - Return RAW JSON ARRAY only
 - No markdown, no explanation text
 
-FORMAT:
+FORMAT (STRICT TYPES):
 [
   {
-    "scholarshipId": "",
-    "title": "",
-    "type": "",
-    "deadline": null,
-    "amount": null,
-    "description": ""
+    "scholarshipId": "string",
+    "title": "string",
+    "type": "string",
+    "detailUrl": "string",
+    "subject": "string",
+    "provider": "string",
+    "deadline": null or "string",
+    "amount": null or "string",
+    "description": "string"
   }
 ]
 `;
 
   const res = await openai.chat.completions.create({
     model: "gpt-4o-mini",
-    temperature: 0.25,
+    temperature: 0.2,
     messages: [{ role: "user", content: prompt }]
   });
 
-  return safeParse(res.choices[0].message.content);
+  const aiResult = safeParse(res.choices[0].message.content);
+
+  // 🔒 FINAL DATA GUARD
+  return restoreAmountFormat(aiResult, filtered);
 }
