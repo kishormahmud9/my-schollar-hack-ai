@@ -1,7 +1,10 @@
-import puppeteer from "puppeteer";
+import puppeteer from "puppeteer-extra";
+import StealthPlugin from "puppeteer-extra-plugin-stealth";
 import * as cheerio from "cheerio";
 
-/* ========================= */
+puppeteer.use(StealthPlugin());
+
+/* ================= SITES ================= */
 const ALL_SITES = {
   "iefa.org": "https://www.iefa.org/scholarships",
   "daad.de": "https://www2.daad.de/deutschland/stipendium/datenbank/en/21148-scholarship-database/",
@@ -11,41 +14,53 @@ const ALL_SITES = {
   "fastweb.com": "https://www.fastweb.com/college-scholarships/scholarships"
 };
 
-/* ========================= */
+let browser;
+
+/* ================= BROWSER ================= */
+async function getBrowser() {
+  if (browser) return browser;
+  browser = await puppeteer.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"]
+  });
+  return browser;
+}
+
+/* ================= FETCH HTML ================= */
 async function getHTML(url) {
-  let browser;
+  const browser = await getBrowser();
+  const page = await browser.newPage();
+
+  await page.setUserAgent(
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+  );
+
   try {
-    browser = await puppeteer.launch({
-      headless: "new",
-      args: ["--no-sandbox", "--disable-setuid-sandbox"]
-    });
-    const page = await browser.newPage();
-    await page.setUserAgent("Mozilla/5.0 Chrome/120");
-    await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
-    return await page.content();
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await new Promise(r => setTimeout(r, 2000));
+    const html = await page.content();
+    await page.close();
+    return html;
   } catch {
-    console.log("SCRAPE FAIL:", url);
+    await page.close();
     return null;
-  } finally {
-    if (browser) await browser.close();
   }
 }
 
-/* ========================= */
-function detectSubject(text = "") {
-  const t = text.toLowerCase();
-  if (t.match(/nursing|medical|health|mbbs|pharmacy/)) return "Medical";
-  if (t.match(/computer|software|ai|data|cyber|it|information/)) return "Information Technology (IT)";
-  if (t.match(/biology|chemistry|physics|math|science|biotech/)) return "Science";
-  return "General";
+/* ================= HELPERS ================= */
+function cleanText(text = "") {
+  return text
+    .replace(/Sponsor:.*/gi, "")
+    .replace(/featured/gi, "")
+    .replace(/Apply Now/gi, "")
+    .replace(/Cookie.*/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function extractAmount(text) {
   const m = text.match(/\$\s?\d{1,3}(,\d{3})*/);
-  if (!m) return null;
-  const val = parseInt(m[0].replace(/\D/g, ""));
-  if (val < 200) return null;
-  return m[0];
+  return m ? m[0] : null;
 }
 
 function extractDeadline(text) {
@@ -53,7 +68,7 @@ function extractDeadline(text) {
   return m ? m[0] : null;
 }
 
-/* ========================= */
+/* ================= LIST PAGE SCRAPER ================= */
 async function scrapeSite(name, url) {
   const html = await getHTML(url);
   if (!html) return [];
@@ -64,117 +79,83 @@ async function scrapeSite(name, url) {
   $("a").each((_, el) => {
     const title = $(el).text().trim();
     const href = $(el).attr("href");
-    if (!href) return;
+
+    if (!title || !href) return;
+    if (title.length < 15) return;
+    if (/login|register|sign up|apply|business/i.test(title)) return;
+    if (!/scholarship|grant|award|fellowship/i.test(title)) return;
 
     const fullUrl = href.startsWith("http") ? href : new URL(href, url).href;
 
-    if (!title || title.length < 15) return;
-    if (/^scholarships?$|award name/i.test(title)) return;
-    if (fullUrl === url) return;
-    if (!/scholarship|award|grant|fellowship/i.test(title)) return;
-
     list.push({
       title,
-      subject: "General",
       provider: name,
       amount: null,
-      description: null,
       deadline: null,
+      description: null,
       detailUrl: fullUrl
     });
   });
 
-  return list.slice(0, 60);
+  return list.slice(0, 25);
 }
 
-/* ========================= */
+/* ================= DETAIL PAGE ENRICH ================= */
 async function enrich(s) {
-  try {
-    const html = await getHTML(s.detailUrl);
-    if (!html) return s;
+  const html = await getHTML(s.detailUrl);
+  if (!html) return s;
 
-    const $ = cheerio.load(html);
-    $("script, style, nav, header, footer, noscript").remove();
+  const $ = cheerio.load(html);
+  $("script, style, nav, header, footer, noscript").remove();
+  const body = $("body").text().replace(/\s+/g, " ");
 
-    const bodyText = $("body").text().replace(/\s+/g, " ");
-    let amount = null;
-    let deadline = null;
-    let description = "";
+  let description = "";
+  let amount = null;
+  let deadline = null;
 
-    /* ========== IEF A ========== */
-    if (s.provider === "iefa.org") {
-      $("li, div, span").each((_, el) => {
-        const t = $(el).text();
-        if (/award amount|value of award|scholarship value/i.test(t)) amount = extractAmount(t);
-        if (/deadline|apply by/i.test(t)) deadline = extractDeadline(t);
-      });
-
-      description = $(".award-description, .scholarship-description, p")
-        .map((_, el) => $(el).text().trim())
+  /* IEFA */
+  if (s.provider === "iefa.org") {
+    description = cleanText(
+      $(".award-description, .scholarship-description, p")
+        .map((_, el) => $(el).text())
         .get()
         .filter(t => t.length > 120)
         .slice(0, 2)
-        .join(" ");
-    }
-
-    /* ========== DAAD (CLEAN) ========== */
-    if (s.provider === "daad.de") {
-      const sections = [];
-
-      $("h2, h3").each((_, el) => {
-        const heading = $(el).text().trim().toLowerCase();
-
-        if (heading.includes("objective") ||
-            heading.includes("funded") ||
-            heading.includes("duration") ||
-            heading.includes("value") ||
-            heading.includes("selection")) {
-
-          const content = $(el).nextUntil("h2, h3")
-            .text()
-            .replace(/\s+/g, " ")
-            .trim();
-
-          if (content.length > 120) sections.push(content);
-        }
-      });
-
-      description = sections.slice(0, 2).join(" ");
-
-      const eur = bodyText.match(/\d{3,4}\s?EUR/i);
-      if (eur) amount = eur[0];
-
-      deadline = extractDeadline(bodyText);
-    }
-
-    /* ========== FASTWEB ========== */
-    if (s.provider === "fastweb.com") {
-      description = $("p")
-        .map((_, el) => $(el).text().trim())
-        .get()
-        .filter(t => t.length > 100)
-        .slice(0, 2)
-        .join(" ");
-    }
-
-    /* ========== FALLBACK ========== */
-    if (!amount) amount = extractAmount(bodyText);
-    if (!deadline) deadline = extractDeadline(bodyText);
-
-    return {
-      ...s,
-      subject: detectSubject(description || s.title),
-      amount,
-      deadline,
-      description
-    };
-
-  } catch {
-    return s;
+        .join(" ")
+    );
   }
+
+  /* DAAD */
+  if (s.provider === "daad.de") {
+    description = cleanText(
+      $(".detail-content, .content, p")
+        .map((_, el) => $(el).text())
+        .get()
+        .filter(t => t.length > 120)
+        .slice(0, 3)
+        .join(" ")
+    );
+  }
+
+  /* OTHERS */
+  if (!description) {
+    description = cleanText(
+      $("p")
+        .map((_, el) => $(el).text())
+        .get()
+        .filter(t => t.length > 120)
+        .slice(0, 2)
+        .join(" ")
+    );
+  }
+
+  amount = extractAmount(body);
+  deadline = extractDeadline(body);
+
+  return { ...s, description, amount, deadline };
 }
 
-/* ========================= */
+/* ================= MAIN ================= */
 export async function scrapeAllScholarships() {
   const tasks = Object.entries(ALL_SITES).map(([name, url]) =>
     scrapeSite(name, url)
@@ -184,12 +165,13 @@ export async function scrapeAllScholarships() {
 
   const unique = data.filter(
     (s, i, arr) =>
-      s.title &&
       arr.findIndex(x => x.title === s.title && x.provider === s.provider) === i
   );
 
   const enriched = [];
-  for (let s of unique.slice(0, 40)) {
+
+  // Controlled crawling to prevent timeout
+  for (const s of unique.slice(0, 40)) {
     enriched.push(await enrich(s));
   }
 
