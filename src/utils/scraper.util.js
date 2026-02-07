@@ -47,6 +47,34 @@ async function getHTML(url) {
   }
 }
 
+/* ================= SUBJECT DETECTION ================= */
+function detectSubject(text = "") {
+  const t = text.toLowerCase();
+
+  if (t.match(/computer|software|ai|data|cyber|it|machine learning|programming/))
+    return "Information Technology (IT)";
+
+  if (t.match(/medical|health|nursing|mbbs|pharmacy|biomedical/))
+    return "Medical";
+
+  if (t.match(/engineering|mechanical|electrical|civil|robotics/))
+    return "Engineering";
+
+  if (t.match(/biology|chemistry|physics|math|science|biotech/))
+    return "Science";
+
+  if (t.match(/law|legal|policy|governance/))
+    return "Law";
+
+  if (t.match(/business|mba|management|finance|economics/))
+    return "Business";
+
+  if (t.match(/art|design|fashion|music|media|film/))
+    return "Arts";
+
+  return "General";
+}
+
 /* ================= HELPERS ================= */
 function cleanText(text = "") {
   return text
@@ -90,6 +118,7 @@ async function scrapeSite(name, url) {
     list.push({
       title,
       provider: name,
+      subject: detectSubject(title),
       amount: null,
       deadline: null,
       description: null,
@@ -110,10 +139,7 @@ async function enrich(s) {
   const body = $("body").text().replace(/\s+/g, " ");
 
   let description = "";
-  let amount = null;
-  let deadline = null;
 
-  /* IEFA */
   if (s.provider === "iefa.org") {
     description = cleanText(
       $(".award-description, .scholarship-description, p")
@@ -125,7 +151,6 @@ async function enrich(s) {
     );
   }
 
-  /* DAAD */
   if (s.provider === "daad.de") {
     description = cleanText(
       $(".detail-content, .content, p")
@@ -137,7 +162,6 @@ async function enrich(s) {
     );
   }
 
-  /* OTHERS */
   if (!description) {
     description = cleanText(
       $("p")
@@ -149,10 +173,15 @@ async function enrich(s) {
     );
   }
 
-  amount = extractAmount(body);
-  deadline = extractDeadline(body);
+  const fullText = s.title + " " + description;
 
-  return { ...s, description, amount, deadline };
+  return {
+    ...s,
+    description,
+    amount: extractAmount(body),
+    deadline: extractDeadline(body),
+    subject: detectSubject(fullText)
+  };
 }
 
 /* ================= MAIN ================= */
@@ -169,8 +198,6 @@ export async function scrapeAllScholarships() {
   );
 
   const enriched = [];
-
-  // Controlled crawling to prevent timeout
   for (const s of unique.slice(0, 40)) {
     enriched.push(await enrich(s));
   }
