@@ -1,31 +1,33 @@
-// 
-import dotenv from "dotenv";
-dotenv.config();
-
 import axios from "axios";
 
-export async function getAllScholarships() {
-  // const SCHOLARSHIP_API = process.env.SCHOLARSHIP_AI_API_URL;
-  // scholarship api hard coded 
-  const SCHOLARSHIP_API =
-    "https://api.myscholarhack.net/api/essay-recommendation/scholarships/all/for-ai";
+let cachedScholarships = null;
+let lastFetchTime = 0;
+const CACHE_DURATION = 1000 * 60 * 30; // Cache for 30 minutes
 
-  console.log("Scholarship API hitting ->", SCHOLARSHIP_API);
+export async function getAllScholarships() {
+  const now = Date.now();
+  
+  // Return cache if it's fresh
+  if (cachedScholarships && (now - lastFetchTime < CACHE_DURATION)) {
+    console.log("⚡ Using cached scholarships");
+    return cachedScholarships;
+  }
+
+  const API_URL = process.env.SCHOLARSHIP_AI_API_URL || "https://api.myscholarhack.net/api/essay-recommendation/scholarships/all/for-ai";
 
   try {
-    const response = await axios.get(SCHOLARSHIP_API);
-
-    console.log("Scholarship status:", response.status);
-
+    console.log("📡 Fetching scholarships from DB...");
+    const response = await axios.get(API_URL);
     const data = response.data;
-    console.log("Data from scholarship API: successfully data getted ✅",);
-
-    return Array.isArray(data) ? data : data.data || [];
+    
+    // The API might return { data: [...] } or just [...]
+    cachedScholarships = Array.isArray(data) ? data : data.data || [];
+    lastFetchTime = now;
+    
+    console.log(`✅ Loaded ${cachedScholarships.length} scholarships from DB`);
+    return cachedScholarships;
   } catch (error) {
-    console.error(
-      "Failed to fetch scholarships:",
-      error.response?.data || error.message
-    );
-    throw error;
+    console.error("❌ Failed to fetch scholarships:", error.message);
+    return cachedScholarships || []; // Fallback to old cache if API is down
   }
 }

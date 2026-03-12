@@ -15,9 +15,8 @@ export async function getUserProfile(userId) {
 
   const raw = await res.json();
 
-  // ✅ Normalize response shape safely
+  // ✅ 1. Normalize response shape safely (Keep your original logic)
   let users;
-
   if (Array.isArray(raw)) {
     users = raw;
   } else if (Array.isArray(raw?.data)) {
@@ -25,7 +24,6 @@ export async function getUserProfile(userId) {
   } else if (Array.isArray(raw?.users)) {
     users = raw.users;
   } else if (typeof raw === "object" && raw !== null) {
-    // Single user object case
     users = [raw];
   } else {
     throw new Error("User API returned unexpected format");
@@ -35,17 +33,28 @@ export async function getUserProfile(userId) {
     throw new Error("User list empty from API");
   }
 
-  // Find matching user
-  const user =
-    users.find(u => String(u.id) === String(userId)) || users[0];
+  // ✅ 2. Find matching user
+  const user = users.find(u => String(u.id) === String(userId));
+  
+  if (!user) {
+    throw new Error(`User with ID ${userId} not found`);
+  }
 
-  // ✅ Safe field mapping
+  // ✅ 3. Deeply map the fields to match your actual backend JSON
+  const p = user.profile || {};
+  
   return {
-    name: user?.name || "",
-    major: user?.major || "",
-    careerGoal: user?.career_goal || "",
-    achievement: user?.achievement || "",
-    background: user?.background || "",
-    challenges: user?.challenges || ""
+    id: user.id,
+    name: user.name || "",
+    // Dig into the nested objects for AI context
+    level: p.education?.level || "college", 
+    major: p.academicInterest?.intendedMajor || "General",
+    academicInterest: p.academicInterest?.intendedMajor ? [p.academicInterest.intendedMajor] : [],
+    careerGoal: p.academicInterest?.careerGoals || "",
+    familyBackground: p.familyBackground?.familySituations || "",
+    studentIdentity: p.diversityIdentity?.selfIdentification || "",
+    workAndVolunteer: p.volunteerWork?.whatVolunteerWork || "",
+    awardsAndChallenges: p.essaySpecificQuestions?.failureStory || "",
+    uniqueExperience: p.uniqueExperience?.uniqueExperiences || ""
   };
 }
